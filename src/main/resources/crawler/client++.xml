@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE components PUBLIC "-//DBFLUTE//DTD LastaDi 1.0//EN"
+	"http://dbflute.org/meta/lastadi10.dtd">
+<components namespace="fessCrawler">
+	<include path="crawler/container.xml" />
+	<component name="smbjClient"
+		class="org.codelibs.fess.crawler.client.smbj.SmbClient"
+		instance="prototype">
+	</component>
+
+	<component name="smbjClientCreator"
+		class="org.codelibs.fess.crawler.client.smbj.SmbClientCreator">
+		<postConstruct name="register">
+			<arg>["smb3:.*"]</arg>
+			<arg>"smbjClient"</arg>
+		</postConstruct>
+	</component>
+</components>
