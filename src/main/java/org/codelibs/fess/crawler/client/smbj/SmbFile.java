@@ -36,6 +36,7 @@ import org.codelibs.fess.crawler.util.TemporaryFileInputStream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.hierynomus.msdtyp.ACL;
 import com.hierynomus.msdtyp.AccessMask;
 import com.hierynomus.msdtyp.SecurityDescriptor;
 import com.hierynomus.msdtyp.SecurityInformation;
@@ -191,7 +192,7 @@ public class SmbFile {
 
     protected String getFileName(final File file) {
         final String uncPath = file.getUncPath();
-        int lastIndex = uncPath.lastIndexOf("\\");
+        final int lastIndex = uncPath.lastIndexOf("\\");
         if (lastIndex == -1) {
             return uncPath;
         }
@@ -355,5 +356,10 @@ public class SmbFile {
                 sessionPool.returnObject(sessionKey, session);
             }
         }
+    }
+
+    public ACE[] getSecurity(final boolean resolveSids) {
+        final ACL dacl = securityDescriptor.getDacl();
+        return dacl.getAces().stream().map(ace -> new ACE(ace, this)).toArray(n -> new ACE[n]);
     }
 }

@@ -56,6 +56,7 @@ import org.codelibs.fess.crawler.helper.MimeTypeHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.hierynomus.msdtyp.ace.AceType;
 import com.hierynomus.smbj.SmbConfig;
 import com.hierynomus.smbj.SmbConfig.Builder;
 import com.hierynomus.smbj.session.Session;
@@ -323,7 +324,7 @@ public class SmbClient extends AbstractCrawlerClient {
                     }
                     final SID ownerUser = file.getOwnerUser();
                     if (ownerUser != null) {
-                        final String[] ownerAttributes = { ownerUser.getAccountName(), ownerUser.getDomainName() };
+                        final String[] ownerAttributes = { ownerUser.getAccountName() };
                         responseData.addMetaData(SMB_OWNER_ATTRIBUTES, ownerAttributes);
                     }
                 } catch (final Exception e) {
@@ -428,8 +429,7 @@ public class SmbClient extends AbstractCrawlerClient {
     }
 
     protected void processAccessControlEntries(final ResponseData responseData, final SmbFile file) {
-        /*
-         try {
+        try {
             final ACE[] aces = file.getSecurity(resolveSids);
             if (aces != null) {
                 final Set<SID> sidAllowSet = new HashSet<>();
@@ -438,40 +438,51 @@ public class SmbClient extends AbstractCrawlerClient {
                     if (logger.isDebugEnabled()) {
                         logger.debug("ACE:{}", ace);
                     }
-                    processAllowedSIDs(file, ace.getSID(), ace.isAllow() ? sidAllowSet : sidDenySet);
+                    final SID sid = ace.getSid();
+                    Set<SID> sidSet = null;
+                    final AceType aceType = ace.getAceHeader().getAceType();
+                    if (aceType == AceType.ACCESS_ALLOWED_ACE_TYPE) {
+                        sidSet = sidAllowSet;
+                    } else if (aceType == AceType.ACCESS_DENIED_ACE_TYPE) {
+                        sidSet = sidDenySet;
+                    }
+                    if (sidSet != null) {
+                        processAllowedSIDs(file, sid, sidSet);
+                    } else if (logger.isDebugEnabled()) {
+                        logger.debug("[{}] Unknown aceType:{}", sid, aceType);
+                    }
                 }
                 responseData.addMetaData(SMB_ALLOWED_SID_ENTRIES, sidAllowSet.toArray(new SID[sidAllowSet.size()]));
                 responseData.addMetaData(SMB_DENIED_SID_ENTRIES, sidDenySet.toArray(new SID[sidDenySet.size()]));
             }
-        } catch (final IOException e) {
-            throw new CrawlingAccessException("Could not access " + file.getPath(), e);
+        } catch (final Exception e) {
+            throw new CrawlingAccessException("Could not access " + file, e);
         }
-        */
     }
 
-    //    protected void processAllowedSIDs(final SmbFile file, final SID sid, final Set<SID> sidSet) {
-    //        if (logger.isDebugEnabled()) {
-    //            logger.debug("SID:{}", sid);
-    //        }
-    //        final byte type = sid.getRevision();
-    //        sidSet.add(sid);
-    //        if (type == SID.SidType.SID_TYPE_DOM_GRP || type == SID.SidType.SID_TYPE_ALIAS) {
-    //            try {
-    //                final CIFSContext context = file.getContext();
-    //                final SID[] children = context.getSIDResolver().getGroupMemberSids(context, file.getServer(), sid.getDomainSid(),
-    //                        sid.getRid(), jcifs.smb.SID.SID_FLAG_RESOLVE_SIDS);
-    //                for (final SID child : children) {
-    //                    if (!sidSet.contains(child)) {
-    //                        processAllowedSIDs(file, child, sidSet);
-    //                    }
-    //                }
-    //            } catch (final Exception e) {
-    //                if (logger.isDebugEnabled()) {
-    //                    logger.debug("Exception on SID processing.", e);
-    //                }
-    //            }
-    //        }
-    //    }
+    protected void processAllowedSIDs(final SmbFile file, final SID sid, final Set<SID> sidSet) {
+        if (logger.isDebugEnabled()) {
+            logger.debug("SID:{}", sid);
+        }
+        final SID.SidType type = sid.getSidType();
+        sidSet.add(sid);
+        if (type == SID.SidType.SID_TYPE_DOM_GRP || type == SID.SidType.SID_TYPE_ALIAS) {
+            // TODO expand members in group
+            //            try {
+            //                 final SID[] children = context.getSIDResolver().getGroupMemberSids(context, file.getServer(), sid.getDomainSid(),
+            //                        sid.getRid(), jcifs.smb.SID.SID_FLAG_RESOLVE_SIDS);
+            //                for (final SID child : children) {
+            //                    if (!sidSet.contains(child)) {
+            //                        processAllowedSIDs(file, child, sidSet);
+            //                    }
+            //                }
+            //            } catch (final Exception e) {
+            //                if (logger.isDebugEnabled()) {
+            //                    logger.debug("Exception on SID processing.", e);
+            //                }
+            //            }
+        }
+    }
 
     protected String preprocessUri(final String uri) {
         if (StringUtil.isEmpty(uri)) {

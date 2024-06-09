@@ -17,10 +17,12 @@ package org.codelibs.fess.crawler.client.smbj;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.logging.Logger;
 
 import org.codelibs.fess.crawler.client.smb.SmbAuthentication;
 import org.codelibs.fess.crawler.container.StandardCrawlerContainer;
+import org.codelibs.fess.crawler.entity.RequestData;
 import org.codelibs.fess.crawler.entity.ResponseData;
 import org.codelibs.fess.crawler.exception.ChildUrlsException;
 import org.codelibs.fess.crawler.helper.impl.MimeTypeHelperImpl;
@@ -84,10 +86,10 @@ public class SmbClientTest extends PlainTestCase {
     }
 
     public void test_doGet_dir() throws Exception {
-        Integer port = server.getFirstMappedPort();
+        final Integer port = server.getFirstMappedPort();
         try (SmbClient client = crawlerContainer.getComponent("smbClient")) {
-            Map<String, Object> params = new HashMap<>();
-            SmbAuthentication smbAuthentication = new SmbAuthentication();
+            final Map<String, Object> params = new HashMap<>();
+            final SmbAuthentication smbAuthentication = new SmbAuthentication();
             smbAuthentication.setServer(server.getHost());
             smbAuthentication.setPort(port);
             smbAuthentication.setUsername("alice");
@@ -98,8 +100,8 @@ public class SmbClientTest extends PlainTestCase {
             try {
                 client.doGet("smb3://" + server.getHost() + ":" + port + "/Home");
                 fail();
-            } catch (ChildUrlsException e) {
-                String[] urls = e.getChildUrlList().stream().map(req -> req.getUrl()).sorted().toArray(n -> new String[n]);
+            } catch (final ChildUrlsException e) {
+                final String[] urls = e.getChildUrlList().stream().map(RequestData::getUrl).sorted().toArray(n -> new String[n]);
                 assertEquals(2, urls.length);
                 assertEquals("smb3://localhost:" + port + "/Home/folder4", urls[0]);
                 assertEquals("smb3://localhost:" + port + "/Home/text4.txt", urls[1]);
@@ -108,10 +110,10 @@ public class SmbClientTest extends PlainTestCase {
     }
 
     public void test_doGet_file() throws Exception {
-        Integer port = server.getFirstMappedPort();
+        final Integer port = server.getFirstMappedPort();
         try (SmbClient client = crawlerContainer.getComponent("smbClient")) {
-            Map<String, Object> params = new HashMap<>();
-            SmbAuthentication smbAuthentication = new SmbAuthentication();
+            final Map<String, Object> params = new HashMap<>();
+            final SmbAuthentication smbAuthentication = new SmbAuthentication();
             smbAuthentication.setServer(server.getHost());
             smbAuthentication.setPort(port);
             smbAuthentication.setUsername("alice");
@@ -119,7 +121,7 @@ public class SmbClientTest extends PlainTestCase {
             smbAuthentication.setDomain("WORKGROUP");
             params.put(SmbClient.SMB_AUTHENTICATIONS_PROPERTY, new SmbAuthentication[] { smbAuthentication });
             client.setInitParameterMap(params);
-            ResponseData responseData = client.doGet("smb3://" + server.getHost() + ":" + port + "/Home/text4.txt");
+            final ResponseData responseData = client.doGet("smb3://" + server.getHost() + ":" + port + "/Home/text4.txt");
             assertNotNull(responseData);
             assertEquals("smb3://localhost:" + port + "/Home/text4.txt", responseData.getUrl());
             assertEquals(7, responseData.getContentLength());
@@ -127,6 +129,13 @@ public class SmbClientTest extends PlainTestCase {
             assertEquals(0, responseData.getStatus());
             assertEquals("UTF-8", responseData.getCharSet());
             assertEquals("GET", responseData.getMethod());
+            final Map<String, Object> metadata = responseData.getMetaDataMap();
+            final String[] ownerAttributes = (String[]) metadata.get(SmbClient.SMB_OWNER_ATTRIBUTES);
+            assertEquals(1, ownerAttributes.length);
+            final SID[] allowSids = (SID[]) metadata.get(SmbClient.SMB_ALLOWED_SID_ENTRIES);
+            assertEquals(3, allowSids.length);
+            final SID[] denySids = (SID[]) metadata.get(SmbClient.SMB_DENIED_SID_ENTRIES);
+            assertEquals(0, denySids.length);
         }
     }
 }

@@ -27,9 +27,13 @@ import com.rapid7.client.dcerpc.transport.SMBTransportFactories;
 public class SID extends com.hierynomus.msdtyp.SID {
     private static final Logger logger = LoggerFactory.getLogger(SID.class);
 
-    private final com.hierynomus.msdtyp.SID parent;
-    private String domainName;
-    private String accountName;
+    protected final com.hierynomus.msdtyp.SID parent;
+
+    protected String domainName;
+
+    protected String accountName;
+
+    protected SidType sidType;
 
     public SID(final com.hierynomus.msdtyp.SID parent, final SmbFile smbFile) {
         this.parent = parent;
@@ -50,6 +54,33 @@ public class SID extends com.hierynomus.msdtyp.SID {
                 domainName = lookupNames[1]; // TODO correct?
             }
         });
+
+        final long[] subAuthorities = getSubAuthorities();
+        if (subAuthorities.length > 0) {
+            final long lastSubAuthority = subAuthorities[subAuthorities.length - 1];
+            if (isDomainGroup(lastSubAuthority)) {
+                sidType = SID.SidType.SID_TYPE_DOM_GRP;
+            } else if (isUser(lastSubAuthority)) {
+                sidType = SID.SidType.SID_TYPE_USER;
+            } else if (isBuiltinGroup(lastSubAuthority)) {
+                sidType = SID.SidType.SID_TYPE_WKN_GRP;
+            } else if (isComputer(lastSubAuthority)) {
+                sidType = SID.SidType.SID_TYPE_COMPUTER;
+            } else if (isAlias(lastSubAuthority)) {
+                sidType = SID.SidType.SID_TYPE_ALIAS;
+            } else if (isDomain(lastSubAuthority)) {
+                sidType = SID.SidType.SID_TYPE_DOMAIN;
+            } else if (isDeleted(lastSubAuthority)) {
+                sidType = SID.SidType.SID_TYPE_DELETED;
+            } else if (isInvalid(lastSubAuthority)) {
+                sidType = SID.SidType.SID_TYPE_INVALID;
+            } else if (isLabel(lastSubAuthority)) {
+                sidType = SID.SidType.SID_TYPE_LABEL;
+            }
+        }
+        if (sidType == null) {
+            sidType = SID.SidType.SID_TYPE_UNKNOWN;
+        }
     }
 
     @Override
@@ -64,7 +95,10 @@ public class SID extends com.hierynomus.msdtyp.SID {
 
     @Override
     public String toString() {
-        return parent.toString();
+        if (accountName == null) {
+            return parent.toString() + ":" + sidType;
+        }
+        return parent.toString() + "(" + accountName + "):" + sidType;
     }
 
     @Override
@@ -99,4 +133,45 @@ public class SID extends com.hierynomus.msdtyp.SID {
     public String getDomainName() {
         return domainName;
     }
+
+    public SID.SidType getSidType() {
+        return sidType;
+    }
+
+    protected boolean isDomainGroup(final long subAuthority) {
+        return subAuthority >= 512 && subAuthority <= 519;
+    }
+
+    protected boolean isUser(final long subAuthority) {
+        return subAuthority >= 500 && subAuthority <= 999;
+    }
+
+    protected boolean isBuiltinGroup(final long subAuthority) {
+        return subAuthority == 544 || subAuthority == 545 || subAuthority == 546;
+    }
+
+    protected boolean isComputer(final long subAuthority) {
+        return subAuthority >= 1000;
+    }
+
+    protected boolean isAlias(final long subAuthority) {
+        return subAuthority >= 544 && subAuthority <= 552;
+    }
+
+    protected boolean isDomain(final long subAuthority) {
+        return subAuthority >= 100 && subAuthority < 200;
+    }
+
+    protected boolean isDeleted(final long subAuthority) {
+        return false; // TODO
+    }
+
+    protected boolean isInvalid(final long subAuthority) {
+        return false; // TODO
+    }
+
+    protected boolean isLabel(final long subAuthority) {
+        return false; // TODO
+    }
+
 }
