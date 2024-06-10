@@ -23,8 +23,8 @@ public class SmbFileInputStream extends InputStream {
 
     private final InputStream parent;
 
-    public SmbFileInputStream(final SmbFile smbFile, final int threshold) {
-        parent = smbFile.getInputStream(threshold);
+    public SmbFileInputStream(final SmbFile smbFile, final long threshold) {
+        parent = smbFile.getInputStream((int) threshold);
     }
 
     @Override

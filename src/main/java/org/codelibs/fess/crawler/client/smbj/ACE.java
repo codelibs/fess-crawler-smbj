@@ -15,6 +15,8 @@
  */
 package org.codelibs.fess.crawler.client.smbj;
 
+import org.codelibs.fess.crawler.client.smbj.pool.SmbSessionLoader;
+
 import com.hierynomus.msdtyp.ace.AceHeader;
 import com.hierynomus.smb.SMBBuffer;
 
@@ -22,11 +24,11 @@ public class ACE {
 
     private final com.hierynomus.msdtyp.ace.ACE parent;
 
-    private final SmbFile smbFile;
+    private final SmbSessionLoader sessionLoader;
 
-    public ACE(final com.hierynomus.msdtyp.ace.ACE parent, final SmbFile smbFile) {
+    public ACE(final com.hierynomus.msdtyp.ace.ACE parent, final SmbSessionLoader sessionLoader) {
         this.parent = parent;
-        this.smbFile = smbFile;
+        this.sessionLoader = sessionLoader;
     }
 
     public final void write(final SMBBuffer buffer) {
@@ -43,7 +45,7 @@ public class ACE {
     }
 
     public SID getSid() {
-        return new SID(parent.getSid(), smbFile);
+        return new SID(parent.getSid(), sessionLoader);
     }
 
     public long getAccessMask() {

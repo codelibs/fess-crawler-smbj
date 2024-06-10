@@ -15,6 +15,22 @@
  */
 package org.codelibs.fess.crawler.client.smbj;
 
+import static com.hierynomus.msdtyp.SID.SidType.SID_TYPE_ALIAS;
+import static com.hierynomus.msdtyp.SID.SidType.SID_TYPE_COMPUTER;
+import static com.hierynomus.msdtyp.SID.SidType.SID_TYPE_DELETED;
+import static com.hierynomus.msdtyp.SID.SidType.SID_TYPE_DOMAIN;
+import static com.hierynomus.msdtyp.SID.SidType.SID_TYPE_DOM_GRP;
+import static com.hierynomus.msdtyp.SID.SidType.SID_TYPE_INVALID;
+import static com.hierynomus.msdtyp.SID.SidType.SID_TYPE_LABEL;
+import static com.hierynomus.msdtyp.SID.SidType.SID_TYPE_UNKNOWN;
+import static com.hierynomus.msdtyp.SID.SidType.SID_TYPE_USER;
+import static com.hierynomus.msdtyp.SID.SidType.SID_TYPE_WKN_GRP;
+
+import java.util.Arrays;
+
+import org.apache.commons.io.IOUtils;
+import org.codelibs.fess.crawler.client.smbj.pool.SmbSessionLoader;
+import org.codelibs.fess.crawler.exception.CrawlingAccessException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,57 +45,78 @@ public class SID extends com.hierynomus.msdtyp.SID {
 
     protected final com.hierynomus.msdtyp.SID parent;
 
+    protected SmbSessionLoader sessionLoader;
+
     protected String domainName;
 
     protected String accountName;
 
     protected SidType sidType;
 
-    public SID(final com.hierynomus.msdtyp.SID parent, final SmbFile smbFile) {
+    public SID(final com.hierynomus.msdtyp.SID parent, final SmbSessionLoader sessionLoader) {
         this.parent = parent;
-        final String sid = parent.toString();
-        smbFile.openSession(session -> {
-            final RPCTransport transport = SMBTransportFactories.LSASVC.getTransport(session);
-            final LocalSecurityAuthorityService lsaService = new LocalSecurityAuthorityService(transport);
-
-            final PolicyHandle policyHandle = lsaService.openPolicyHandle();
-            final String[] lookupNames = lsaService.lookupNamesForSIDs(policyHandle, com.rapid7.client.dcerpc.dto.SID.fromString(sid));
-            if (logger.isDebugEnabled()) {
-                logger.debug("sid lookup: {} -> {}", sid, lookupNames);
-            }
-            if (lookupNames.length > 0) {
-                accountName = lookupNames[0];
-            }
-            if (lookupNames.length > 1) {
-                domainName = lookupNames[1]; // TODO correct?
-            }
-        });
+        this.sessionLoader = sessionLoader;
 
         final long[] subAuthorities = getSubAuthorities();
         if (subAuthorities.length > 0) {
             final long lastSubAuthority = subAuthorities[subAuthorities.length - 1];
             if (isDomainGroup(lastSubAuthority)) {
-                sidType = SID.SidType.SID_TYPE_DOM_GRP;
+                sidType = SID_TYPE_DOM_GRP;
             } else if (isUser(lastSubAuthority)) {
-                sidType = SID.SidType.SID_TYPE_USER;
+                sidType = SID_TYPE_USER;
             } else if (isBuiltinGroup(lastSubAuthority)) {
-                sidType = SID.SidType.SID_TYPE_WKN_GRP;
+                sidType = SID_TYPE_WKN_GRP;
             } else if (isComputer(lastSubAuthority)) {
-                sidType = SID.SidType.SID_TYPE_COMPUTER;
+                sidType = SID_TYPE_COMPUTER;
             } else if (isAlias(lastSubAuthority)) {
-                sidType = SID.SidType.SID_TYPE_ALIAS;
+                sidType = SID_TYPE_ALIAS;
             } else if (isDomain(lastSubAuthority)) {
-                sidType = SID.SidType.SID_TYPE_DOMAIN;
+                sidType = SID_TYPE_DOMAIN;
             } else if (isDeleted(lastSubAuthority)) {
-                sidType = SID.SidType.SID_TYPE_DELETED;
+                sidType = SID_TYPE_DELETED;
             } else if (isInvalid(lastSubAuthority)) {
-                sidType = SID.SidType.SID_TYPE_INVALID;
+                sidType = SID_TYPE_INVALID;
             } else if (isLabel(lastSubAuthority)) {
-                sidType = SID.SidType.SID_TYPE_LABEL;
+                sidType = SID_TYPE_LABEL;
+            }
+            if (logger.isDebugEnabled()) {
+                logger.debug("lastSubAuthority={}, sidType={}", lastSubAuthority, sidType);
             }
         }
         if (sidType == null) {
-            sidType = SID.SidType.SID_TYPE_UNKNOWN;
+            sidType = SID_TYPE_UNKNOWN;
+        }
+    }
+
+    protected void loadAccountAndDomainName() {
+        final String sid = parent.toString();
+        SmbSession session = null;
+        try {
+            session = sessionLoader.borrowObject();
+            final RPCTransport transport = SMBTransportFactories.LSASVC.getTransport(session.getSession());
+            final LocalSecurityAuthorityService lsaService = new LocalSecurityAuthorityService(transport);
+
+            final PolicyHandle policyHandle = lsaService.openPolicyHandle();
+            try {
+                final String[] lookupNames = lsaService.lookupNamesForSIDs(policyHandle, com.rapid7.client.dcerpc.dto.SID.fromString(sid));
+                if (logger.isDebugEnabled()) {
+                    logger.debug("sid lookup: {} -> {}", sid, Arrays.toString(lookupNames));
+                }
+                if (lookupNames.length > 0) {
+                    accountName = lookupNames[0];
+                }
+                if (lookupNames.length > 1) {
+                    domainName = lookupNames[1]; // TODO correct?
+                }
+            } finally {
+                lsaService.closePolicyHandle(policyHandle);
+            }
+            sessionLoader.returnObject(session);
+        } catch (final Exception e) {
+            if (logger.isDebugEnabled()) {
+                logger.debug("Failed to access {}", sid, e);
+            }
+            IOUtils.closeQuietly(session);
         }
     }
 
@@ -127,14 +164,20 @@ public class SID extends com.hierynomus.msdtyp.SID {
     }
 
     public String getAccountName() {
+        if (accountName == null) {
+            loadAccountAndDomainName();
+        }
         return accountName;
     }
 
     public String getDomainName() {
+        if (accountName == null) {
+            loadAccountAndDomainName();
+        }
         return domainName;
     }
 
-    public SID.SidType getSidType() {
+    public SidType getSidType() {
         return sidType;
     }
 
@@ -172,6 +215,25 @@ public class SID extends com.hierynomus.msdtyp.SID {
 
     protected boolean isLabel(final long subAuthority) {
         return false; // TODO
+    }
+
+    public SID[] getGroupMemberSids() {
+        if (logger.isDebugEnabled()) {
+            logger.debug("load group members from {}", this);
+        }
+        SmbSession session = null;
+        try {
+            session = sessionLoader.borrowObject();
+            final SID[] memberSids = session.getGroupMembers(this);
+            if (logger.isDebugEnabled()) {
+                logger.debug("group members: {}", Arrays.toString(memberSids));
+            }
+            sessionLoader.returnObject(session);
+            return memberSids;
+        } catch (final Exception e) {
+            IOUtils.closeQuietly(session);
+            throw new CrawlingAccessException("Failed to access group members for " + this, e);
+        }
     }
 
 }

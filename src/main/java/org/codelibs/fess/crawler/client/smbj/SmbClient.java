@@ -15,6 +15,10 @@
  */
 package org.codelibs.fess.crawler.client.smbj;
 
+import static com.hierynomus.msdtyp.SID.SidType.SID_TYPE_ALIAS;
+import static com.hierynomus.msdtyp.SID.SidType.SID_TYPE_DOM_GRP;
+import static com.hierynomus.msdtyp.SID.SidType.SID_TYPE_WKN_GRP;
+
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.File;
@@ -22,6 +26,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.Set;
@@ -56,10 +61,10 @@ import org.codelibs.fess.crawler.helper.MimeTypeHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.hierynomus.msdtyp.SID.SidType;
 import com.hierynomus.msdtyp.ace.AceType;
 import com.hierynomus.smbj.SmbConfig;
 import com.hierynomus.smbj.SmbConfig.Builder;
-import com.hierynomus.smbj.session.Session;
 
 import jcifs.smb.NtlmPasswordAuthenticator;
 
@@ -87,9 +92,7 @@ public class SmbClient extends AbstractCrawlerClient {
     @Resource
     protected ContentLengthHelper contentLengthHelper;
 
-    protected GenericKeyedObjectPool<SmbSessionKey, Session> sessionPool;
-
-    protected int maxCachedContentSize = 1024 * 1024; //1mb
+    protected GenericKeyedObjectPool<SmbSessionKey, SmbSession> sessionPool;
 
     @Override
     public synchronized void init() {
@@ -107,15 +110,10 @@ public class SmbClient extends AbstractCrawlerClient {
                 new PooledSmbSessionFactory(createSmbConfig(),
                         getInitParameter(SMB_AUTHENTICATIONS_PROPERTY, new SmbAuthentication[0], SmbAuthentication[].class)),
                 createSmbPoolConfig());
-
-        final String maxCachedContentSizeStr = System.getProperty("smbj.config.max_cache_content_size");
-        if (StringUtil.isNotBlank(maxCachedContentSizeStr)) {
-            maxCachedContentSize = Integer.parseInt(maxCachedContentSizeStr);
-        }
     }
 
-    protected GenericKeyedObjectPoolConfig<Session> createSmbPoolConfig() {
-        final GenericKeyedObjectPoolConfig<Session> poolConfig = new GenericKeyedObjectPoolConfig<>();
+    protected GenericKeyedObjectPoolConfig<SmbSession> createSmbPoolConfig() {
+        final GenericKeyedObjectPoolConfig<SmbSession> poolConfig = new GenericKeyedObjectPoolConfig<>();
         final String prefix = "smbj.pool.";
         System.getProperties().entrySet().stream().filter(e -> e.getKey().toString().startsWith(prefix)).forEach(e -> {
             final String key = e.getKey().toString().substring(prefix.length());
@@ -187,6 +185,9 @@ public class SmbClient extends AbstractCrawlerClient {
                 }
             }
         });
+        if (logger.isDebugEnabled()) {
+            logger.debug("pool config: {}", poolConfig);
+        }
         return poolConfig;
     }
 
@@ -196,6 +197,9 @@ public class SmbClient extends AbstractCrawlerClient {
         System.getProperties().entrySet().stream().filter(e -> e.getKey().toString().startsWith(prefix)).forEach(e -> {
             final String key = e.getKey().toString().substring(prefix.length());
             if (e.getValue() instanceof final String value) {
+                if (logger.isDebugEnabled()) {
+                    logger.debug("config: {}={}", key, value);
+                }
                 switch (key) {
                 case "buffer_size":
                     builder.withBufferSize(Integer.parseInt(value));
@@ -335,12 +339,12 @@ public class SmbClient extends AbstractCrawlerClient {
                     logger.debug("Parsing SmbFile ACL: {}", filePath);
                 }
                 processAccessControlEntries(responseData, file);
-                //                final Map<String, List<String>> headerFieldMap = file.getHeaderFields();
-                //                if (headerFieldMap != null) {
-                //                    for (final Map.Entry<String, List<String>> entry : headerFieldMap.entrySet()) {
-                //                        responseData.addMetaData(entry.getKey(), entry.getValue());
-                //                    }
-                //                }
+                // final Map<String, List<String>> headerFieldMap = file.getHeaderFields();
+                // if (headerFieldMap != null) {
+                //     for (final Map.Entry<String, List<String>> entry : headerFieldMap.entrySet()) {
+                //         responseData.addMetaData(entry.getKey(), entry.getValue());
+                //     }
+                // }
 
                 if (file.canRead()) {
                     final MimeTypeHelper mimeTypeHelper = crawlerContainer.getComponent("mimeTypeHelper");
@@ -431,6 +435,9 @@ public class SmbClient extends AbstractCrawlerClient {
     protected void processAccessControlEntries(final ResponseData responseData, final SmbFile file) {
         try {
             final ACE[] aces = file.getSecurity(resolveSids);
+            if (logger.isDebugEnabled()) {
+                logger.debug("load ace: {} -> {}", file, Arrays.toString(aces));
+            }
             if (aces != null) {
                 final Set<SID> sidAllowSet = new HashSet<>();
                 final Set<SID> sidDenySet = new HashSet<>();
@@ -447,7 +454,7 @@ public class SmbClient extends AbstractCrawlerClient {
                         sidSet = sidDenySet;
                     }
                     if (sidSet != null) {
-                        processAllowedSIDs(file, sid, sidSet);
+                        processAllowedOrDeniedSIDs(file, sid, sidSet);
                     } else if (logger.isDebugEnabled()) {
                         logger.debug("[{}] Unknown aceType:{}", sid, aceType);
                     }
@@ -460,27 +467,28 @@ public class SmbClient extends AbstractCrawlerClient {
         }
     }
 
-    protected void processAllowedSIDs(final SmbFile file, final SID sid, final Set<SID> sidSet) {
+    protected void processAllowedOrDeniedSIDs(final SmbFile file, final SID sid, final Set<SID> sidSet) {
         if (logger.isDebugEnabled()) {
             logger.debug("SID:{}", sid);
         }
-        final SID.SidType type = sid.getSidType();
+        final SidType type = sid.getSidType();
         sidSet.add(sid);
-        if (type == SID.SidType.SID_TYPE_DOM_GRP || type == SID.SidType.SID_TYPE_ALIAS) {
-            // TODO expand members in group
-            //            try {
-            //                 final SID[] children = context.getSIDResolver().getGroupMemberSids(context, file.getServer(), sid.getDomainSid(),
-            //                        sid.getRid(), jcifs.smb.SID.SID_FLAG_RESOLVE_SIDS);
-            //                for (final SID child : children) {
-            //                    if (!sidSet.contains(child)) {
-            //                        processAllowedSIDs(file, child, sidSet);
-            //                    }
-            //                }
-            //            } catch (final Exception e) {
-            //                if (logger.isDebugEnabled()) {
-            //                    logger.debug("Exception on SID processing.", e);
-            //                }
-            //            }
+        if (type == SID_TYPE_DOM_GRP || type == SID_TYPE_WKN_GRP || type == SID_TYPE_ALIAS) {
+            try {
+                final SID[] children = sid.getGroupMemberSids();
+                if (logger.isDebugEnabled()) {
+                    logger.debug("child SID: {} -> {}", sid, Arrays.toString(children));
+                }
+                for (final SID child : children) {
+                    if (!sidSet.contains(child)) {
+                        processAllowedOrDeniedSIDs(file, child, sidSet);
+                    }
+                }
+            } catch (final Exception e) {
+                if (logger.isDebugEnabled()) {
+                    logger.debug("Exception on SID processing.", e);
+                }
+            }
         }
     }
 
@@ -557,6 +565,10 @@ public class SmbClient extends AbstractCrawlerClient {
      */
     public void setCharset(final String charset) {
         this.charset = charset;
+    }
+
+    public void setMaxCachedContentSize(int maxCachedContentSize) {
+        this.maxCachedContentSize = maxCachedContentSize;
     }
 
 }

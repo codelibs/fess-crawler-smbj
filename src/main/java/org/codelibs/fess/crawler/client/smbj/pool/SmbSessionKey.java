@@ -20,16 +20,24 @@ import java.net.URL;
 import java.util.Objects;
 
 import org.codelibs.fess.crawler.exception.CrawlerSystemException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class SmbSessionKey {
-    private String host;
-    private int port;
+    private static final Logger logger = LoggerFactory.getLogger(SmbSessionKey.class);
+
+    protected String host;
+
+    protected int port;
 
     public SmbSessionKey(final String url) {
         try {
             final URL u = new URL(url);
             host = u.getHost();
             port = u.getPort();
+            if (logger.isDebugEnabled()) {
+                logger.debug("create key: host={}, port={}, url={}", host, port, u);
+            }
         } catch (final MalformedURLException e) {
             throw new CrawlerSystemException("Invalid url: " + url, e);
         }
@@ -38,6 +46,9 @@ public class SmbSessionKey {
     public SmbSessionKey(final String host, final int port) {
         this.host = host;
         this.port = port;
+        if (logger.isDebugEnabled()) {
+            logger.debug("create key: host={}, port={}", host, port);
+        }
     }
 
     @Override

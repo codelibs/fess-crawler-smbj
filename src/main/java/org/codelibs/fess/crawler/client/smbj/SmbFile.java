@@ -16,7 +16,6 @@
 package org.codelibs.fess.crawler.client.smbj;
 
 import java.io.ByteArrayInputStream;
-import java.io.IOException;
 import java.io.InputStream;
 import java.net.MalformedURLException;
 import java.net.URL;
@@ -25,12 +24,14 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.function.Function;
 
+import org.apache.commons.io.IOUtils;
 import org.apache.commons.io.output.DeferredFileOutputStream;
 import org.apache.commons.lang3.SystemUtils;
 import org.apache.commons.pool2.impl.GenericKeyedObjectPool;
 import org.codelibs.core.io.CopyUtil;
 import org.codelibs.core.lang.StringUtil;
 import org.codelibs.fess.crawler.client.smbj.pool.SmbSessionKey;
+import org.codelibs.fess.crawler.client.smbj.pool.SmbSessionLoader;
 import org.codelibs.fess.crawler.exception.CrawlingAccessException;
 import org.codelibs.fess.crawler.util.TemporaryFileInputStream;
 import org.slf4j.Logger;
@@ -47,7 +48,6 @@ import com.hierynomus.msfscc.fileinformation.FileStandardInformation;
 import com.hierynomus.mssmb2.SMB2CreateDisposition;
 import com.hierynomus.mssmb2.SMB2CreateOptions;
 import com.hierynomus.mssmb2.SMB2ShareAccess;
-import com.hierynomus.smbj.session.Session;
 import com.hierynomus.smbj.share.DiskShare;
 import com.hierynomus.smbj.share.File;
 import com.hierynomus.smbj.share.Share;
@@ -57,7 +57,7 @@ public class SmbFile {
 
     private SmbSessionKey sessionKey;
 
-    private final GenericKeyedObjectPool<SmbSessionKey, Session> sessionPool;
+    private final GenericKeyedObjectPool<SmbSessionKey, SmbSession> sessionPool;
 
     private String shareName;
 
@@ -79,7 +79,9 @@ public class SmbFile {
 
     private Boolean isDirectoryObject;
 
-    public SmbFile(final String url, final GenericKeyedObjectPool<SmbSessionKey, Session> sessionPool) {
+    private SmbSessionLoader sessionLoader;
+
+    public SmbFile(final String url, final GenericKeyedObjectPool<SmbSessionKey, SmbSession> sessionPool) {
         this.sessionPool = sessionPool;
         try {
             final URL u = new URL(url);
@@ -97,9 +99,12 @@ public class SmbFile {
             } else {
                 path = StringUtil.EMPTY;
             }
-
+            sessionLoader = new SmbSessionLoader(sessionKey, sessionPool);
         } catch (final MalformedURLException e) {
             throw new CrawlingAccessException("Invalid url: " + url, e);
+        }
+        if (logger.isDebugEnabled()) {
+            logger.debug("create file: {} -> {}", url, this);
         }
     }
 
@@ -118,9 +123,12 @@ public class SmbFile {
     }
 
     protected boolean existsObject(final Function<DiskShare, Boolean> func) {
-        Session session = null;
+        if (logger.isDebugEnabled()) {
+            logger.debug("exists object: {}", this);
+        }
+        SmbSession session = null;
         try {
-            session = sessionPool.borrowObject(sessionKey);
+            session = sessionLoader.borrowObject();
             try (Share share = session.connectShare(shareName)) {
                 if (share instanceof final DiskShare diskShare) {
                     return func.apply(diskShare);
@@ -128,17 +136,14 @@ public class SmbFile {
                 if (logger.isDebugEnabled()) {
                     logger.debug("{}://{}/{}/{} is not DiskShare.", protocol, sessionKey, shareName, path, share);
                 }
+            } finally {
+                sessionLoader.returnObject(session);
             }
         } catch (final Exception e) {
             if (logger.isDebugEnabled()) {
                 logger.debug("Failed to access {}://{}/{}/{}", protocol, sessionKey, shareName, path, e);
             }
-            closeSession(session);
-            session = null;
-        } finally {
-            if (session != null) {
-                sessionPool.returnObject(sessionKey, session);
-            }
+            IOUtils.closeQuietly(session);
         }
         return false;
     }
@@ -148,9 +153,13 @@ public class SmbFile {
             return;
         }
 
-        Session session = null;
+        if (logger.isDebugEnabled()) {
+            logger.debug("load info: {}", this);
+        }
+
+        SmbSession session = null;
         try {
-            session = sessionPool.borrowObject(sessionKey);
+            session = sessionLoader.borrowObject();
             try (Share share = session.connectShare(shareName)) {
                 if (share instanceof final DiskShare diskShare) {
                     try (File file = diskShare.openFile(path, EnumSet.of(AccessMask.GENERIC_READ),
@@ -161,32 +170,26 @@ public class SmbFile {
                         basicInfo = file.getFileInformation(FileBasicInformation.class);
                         securityDescriptor = file.getSecurityInformation(
                                 EnumSet.of(SecurityInformation.OWNER_SECURITY_INFORMATION, SecurityInformation.DACL_SECURITY_INFORMATION));
+                        if (logger.isDebugEnabled()) {
+                            logger.debug("fileName={}, standardInfo={}, basicInfo={}, securityDescriptor={}", fileName, standardInfo,
+                                    basicInfo, securityDescriptor);
+                        }
                         return;
                     }
                 }
                 if (logger.isDebugEnabled()) {
-                    logger.debug("{}://{}/{}/{} is not DiskShare.", protocol, sessionKey, shareName, path, share);
+                    logger.debug("{} is not DiskShare.", this, share);
                 }
+            } finally {
+                sessionLoader.returnObject(session);
             }
         } catch (final Exception e) {
             if (logger.isDebugEnabled()) {
-                logger.debug("Failed to access {}://{}/{}/{}", protocol, sessionKey, shareName, path, e);
+                logger.debug("Failed to access {}", this, e);
             }
-            closeSession(session);
-            session = null;
+            IOUtils.closeQuietly(session);
         } finally {
             hasFileInfo = true;
-            if (session != null) {
-                sessionPool.returnObject(sessionKey, session);
-            }
-        }
-    }
-
-    protected void closeSession(final Session session) {
-        try {
-            session.close();
-        } catch (final IOException e) {
-            logger.warn("Failed to close the session for " + sessionKey, e);
         }
     }
 
@@ -237,27 +240,7 @@ public class SmbFile {
         if (!hasFileInfo) {
             loadFileInfo();
         }
-        return new SID(securityDescriptor.getOwnerSid(), this);
-    }
-
-    public void openSession(final SessionCallback consumer) {
-        Session session = null;
-        try {
-            session = sessionPool.borrowObject(sessionKey);
-            consumer.accept(session);
-        } catch (final Exception e) {
-            closeSession(session);
-            session = null;
-            throw new CrawlingAccessException("Failed to process the session: " + sessionKey, e);
-        } finally {
-            if (session != null) {
-                sessionPool.returnObject(sessionKey, session);
-            }
-        }
-    }
-
-    interface SessionCallback {
-        void accept(Session session) throws Exception;
+        return new SID(securityDescriptor.getOwnerSid(), sessionLoader);
     }
 
     public boolean canRead() {
@@ -276,14 +259,21 @@ public class SmbFile {
             return new SmbFile[0];
         }
 
-        Session session = null;
+        if (logger.isDebugEnabled()) {
+            logger.debug("list files: {}", this);
+        }
+
+        SmbSession session = null;
         try {
-            session = sessionPool.borrowObject(sessionKey);
+            session = sessionLoader.borrowObject();
             try (Share share = session.connectShare(shareName)) {
                 if (share instanceof final DiskShare diskShare) {
                     final List<SmbFile> fileList = new ArrayList<>();
                     for (final FileIdBothDirectoryInformation f : diskShare.list(path)) {
                         final String fileName = f.getFileName();
+                        if (logger.isDebugEnabled()) {
+                            logger.debug("fileName: {}", fileName);
+                        }
                         if (".".equals(fileName) || "..".equals(fileName)) {
                             continue;
                         }
@@ -303,32 +293,28 @@ public class SmbFile {
                     }
                     return fileList.toArray(n -> new SmbFile[n]);
                 }
-                throw new CrawlingAccessException(toString() + " is not a directory. The type is " + share);
+            } finally {
+                sessionLoader.returnObject(session);
             }
+            throw new CrawlingAccessException(this + " is not a directory.");
         } catch (final Exception e) {
-            closeSession(session);
-            session = null;
+            IOUtils.closeQuietly(session);
             throw new CrawlingAccessException("Failed to get files in " + toString(), e);
-        } finally {
-            if (session != null) {
-                sessionPool.returnObject(sessionKey, session);
-            }
         }
-    }
-
-    @Override
-    public String toString() {
-        return protocol + "://" + sessionKey + "/" + shareName + "/" + path;
     }
 
     public InputStream getInputStream(final int threshold) {
         if (!isFile()) {
-            throw new CrawlingAccessException(toString() + " is not a file.");
+            throw new CrawlingAccessException(this + " is not a file.");
         }
 
-        Session session = null;
+        if (logger.isDebugEnabled()) {
+            logger.debug("get inputstream: {} : {}", this, threshold);
+        }
+
+        SmbSession session = null;
         try {
-            session = sessionPool.borrowObject(sessionKey);
+            session = sessionLoader.borrowObject();
             try (Share share = session.connectShare(shareName)) {
                 if (share instanceof final DiskShare diskShare) {
                     try (File file = diskShare.openFile(path, EnumSet.of(AccessMask.GENERIC_READ),
@@ -339,27 +325,41 @@ public class SmbFile {
                         CopyUtil.copy(file.getInputStream(), dfos);
                         dfos.flush();
 
+                        if (logger.isDebugEnabled()) {
+                            logger.debug("use memory: {} ", dfos.isInMemory());
+                        }
+
                         if (dfos.isInMemory()) {
                             return new ByteArrayInputStream(dfos.getData());
                         }
                         return new TemporaryFileInputStream(dfos.getFile());
                     }
                 }
-                throw new CrawlingAccessException(toString() + " is not a file. The type is " + share);
+            } finally {
+                sessionLoader.returnObject(session);
             }
+            throw new CrawlingAccessException(this + " is not a file.");
         } catch (final Exception e) {
-            closeSession(session);
-            session = null;
-            throw new CrawlingAccessException("Failed to access " + toString(), e);
-        } finally {
-            if (session != null) {
-                sessionPool.returnObject(sessionKey, session);
-            }
+            IOUtils.closeQuietly(session);
+            throw new CrawlingAccessException("Failed to access " + this, e);
         }
     }
 
     public ACE[] getSecurity(final boolean resolveSids) {
         final ACL dacl = securityDescriptor.getDacl();
-        return dacl.getAces().stream().map(ace -> new ACE(ace, this)).toArray(n -> new ACE[n]);
+        if (logger.isDebugEnabled()) {
+            logger.debug("dacl: {}", dacl);
+        }
+        return dacl.getAces().stream().map(ace -> new ACE(ace, sessionLoader)).toArray(n -> new ACE[n]);
     }
+
+    @Override
+    public String toString() {
+        return protocol + "://" + sessionKey + "/" + shareName + "/" + path;
+    }
+
+    interface SessionCallback {
+        void accept(SmbSession session) throws Exception;
+    }
+
 }

@@ -15,25 +15,28 @@
  */
 package org.codelibs.fess.crawler.client.smbj.pool;
 
-import java.io.IOException;
-
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.pool2.BaseKeyedPooledObjectFactory;
 import org.apache.commons.pool2.PooledObject;
 import org.apache.commons.pool2.impl.DefaultPooledObject;
 import org.apache.poi.util.StringUtil;
 import org.codelibs.fess.crawler.client.smb.SmbAuthentication;
+import org.codelibs.fess.crawler.client.smbj.SmbSession;
 import org.codelibs.fess.crawler.exception.CrawlerSystemException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.hierynomus.smbj.SMBClient;
 import com.hierynomus.smbj.SmbConfig;
 import com.hierynomus.smbj.auth.AuthenticationContext;
 import com.hierynomus.smbj.connection.Connection;
-import com.hierynomus.smbj.session.Session;
 
-public class PooledSmbSessionFactory extends BaseKeyedPooledObjectFactory<SmbSessionKey, Session> {
+public class PooledSmbSessionFactory extends BaseKeyedPooledObjectFactory<SmbSessionKey, SmbSession> {
+
+    private static final Logger logger = LoggerFactory.getLogger(PooledSmbSessionFactory.class);
 
     private final SmbConfig config;
+
     private final SmbAuthentication[] authentications;
 
     public PooledSmbSessionFactory(final SmbConfig smbConfig, final SmbAuthentication[] smbAuthentications) {
@@ -42,10 +45,13 @@ public class PooledSmbSessionFactory extends BaseKeyedPooledObjectFactory<SmbSes
     }
 
     @Override
-    public Session create(final SmbSessionKey key) throws Exception {
+    public SmbSession create(final SmbSessionKey key) throws Exception {
         int port = key.getPort();
         if (port == -1) {
             port = 139;
+        }
+        if (logger.isDebugEnabled()) {
+            logger.debug("create session: key={}, port={}", key, port);
         }
         @SuppressWarnings("resource") // close client in destroyObject
         final SMBClient client = new SMBClient(config);
@@ -55,31 +61,27 @@ public class PooledSmbSessionFactory extends BaseKeyedPooledObjectFactory<SmbSes
                 final String domain = auth.getDomain();
                 final AuthenticationContext ac = new AuthenticationContext(auth.getUsername(), auth.getPassword().toCharArray(),
                         StringUtil.isBlank(domain) ? "WORKGROUP" : domain);
-                return connection.authenticate(ac);
+                if (logger.isDebugEnabled()) {
+                    logger.debug("AuthenticationContext={}", ac);
+                }
+                return new SmbSession(connection.authenticate(ac));
             }
         }
-        closeConnection(connection);
+        IOUtils.closeQuietly(client);
         throw new CrawlerSystemException("Cannot find a proper authentication for " + key);
     }
 
     @Override
-    public PooledObject<Session> wrap(final Session value) {
+    public PooledObject<SmbSession> wrap(final SmbSession value) {
         return new DefaultPooledObject<>(value);
     }
 
     @Override
-    public void destroyObject(final SmbSessionKey key, final PooledObject<Session> p) throws Exception {
-        closeConnection(p.getObject().getConnection());
+    public void destroyObject(final SmbSessionKey key, final PooledObject<SmbSession> p) throws Exception {
+        if (logger.isDebugEnabled()) {
+            logger.debug("destroy session: key={}, session={}", key, p.getObject());
+        }
+        p.getObject().close();
     }
 
-    private void closeConnection(final Connection connection) throws IOException {
-        if (connection == null) {
-            return;
-        }
-        try {
-            connection.close(true);
-        } finally {
-            IOUtils.closeQuietly(connection.getClient());
-        }
-    }
 }
