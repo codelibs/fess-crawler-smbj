@@ -103,8 +103,8 @@ public class SmbClientTest extends PlainTestCase {
             } catch (final ChildUrlsException e) {
                 final String[] urls = e.getChildUrlList().stream().map(RequestData::getUrl).sorted().toArray(n -> new String[n]);
                 assertEquals(2, urls.length);
-                assertEquals("smb3://localhost:" + port + "/Home/folder4", urls[0]);
-                assertEquals("smb3://localhost:" + port + "/Home/text4.txt", urls[1]);
+                assertEquals("smb3://" + server.getHost() + ":" + port + "/Home/folder4", urls[0]);
+                assertEquals("smb3://" + server.getHost() + ":" + port + "/Home/text4.txt", urls[1]);
             }
         }
     }
