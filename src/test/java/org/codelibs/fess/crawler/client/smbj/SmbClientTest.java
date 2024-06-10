@@ -17,9 +17,9 @@ package org.codelibs.fess.crawler.client.smbj;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Set;
 import java.util.logging.Logger;
 
+import org.codelibs.core.io.InputStreamUtil;
 import org.codelibs.fess.crawler.client.smb.SmbAuthentication;
 import org.codelibs.fess.crawler.container.StandardCrawlerContainer;
 import org.codelibs.fess.crawler.entity.RequestData;
@@ -123,7 +123,7 @@ public class SmbClientTest extends PlainTestCase {
             client.setInitParameterMap(params);
             final ResponseData responseData = client.doGet("smb3://" + server.getHost() + ":" + port + "/Home/text4.txt");
             assertNotNull(responseData);
-            assertEquals("smb3://localhost:" + port + "/Home/text4.txt", responseData.getUrl());
+            assertEquals("smb3://" + server.getHost() + ":" + port + "/Home/text4.txt", responseData.getUrl());
             assertEquals(7, responseData.getContentLength());
             assertEquals(200, responseData.getHttpStatusCode());
             assertEquals(0, responseData.getStatus());
@@ -136,6 +136,7 @@ public class SmbClientTest extends PlainTestCase {
             assertEquals(3, allowSids.length);
             final SID[] denySids = (SID[]) metadata.get(SmbClient.SMB_DENIED_SID_ENTRIES);
             assertEquals(0, denySids.length);
+            assertEquals("test 4", new String(InputStreamUtil.getBytes(responseData.getResponseBody())).trim());
         }
     }
 }
