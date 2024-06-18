@@ -22,6 +22,8 @@ import java.net.URLStreamHandler;
 
 public class Handler extends URLStreamHandler {
 
+    public static final String PROTOCOL_TYPE = "file";
+
     static final URLStreamHandler SMB_HANDLER = new Handler();
 
     @Override
