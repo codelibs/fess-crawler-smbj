@@ -32,6 +32,16 @@
 				<artifactId>maven-source-plugin</artifactId>
 			</plugin>
 			<plugin>
+				<artifactId>maven-jar-plugin</artifactId>
+				<configuration>
+					<archive>
+						<manifestEntries>
+							<Fess-WebAppJar>true</Fess-WebAppJar>
+						</manifestEntries>
+					</archive>
+				</configuration>
+			</plugin>
+			<plugin>
 				<groupId>net.revelc.code.formatter</groupId>
 				<artifactId>formatter-maven-plugin</artifactId>
 			</plugin>
@@ -59,12 +69,27 @@
 							</artifactSet>
 							<filters>
 								<filter>
-									<artifact>*:*</artifact>
+									<artifact>com.hierynomus:asn-one</artifact>
 									<excludes>
 										<exclude>META-INF/MANIFEST.MF</exclude>
-										<exclude>META-INF/LICENSE</exclude>
-										<exclude>META-INF/*.SF</exclude>
-										<exclude>META-INF/*.RSA</exclude>
+									</excludes>
+								</filter>
+								<filter>
+									<artifact>com.rapid7.client:dcerpc</artifact>
+									<excludes>
+										<exclude>META-INF/MANIFEST.MF</exclude>
+									</excludes>
+								</filter>
+								<filter>
+									<artifact>net.engio:mbassador</artifact>
+									<excludes>
+										<exclude>META-INF/MANIFEST.MF</exclude>
+									</excludes>
+								</filter>
+								<filter>
+									<artifact>com.hierynomus:smbj</artifact>
+									<excludes>
+										<exclude>META-INF/MANIFEST.MF</exclude>
 									</excludes>
 								</filter>
 							</filters>
