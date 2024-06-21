@@ -41,6 +41,7 @@ import org.codelibs.core.io.CloseableUtil;
 import org.codelibs.core.io.FileUtil;
 import org.codelibs.core.io.InputStreamUtil;
 import org.codelibs.core.lang.StringUtil;
+import org.codelibs.core.stream.StreamUtil;
 import org.codelibs.core.timer.TimeoutManager;
 import org.codelibs.core.timer.TimeoutTask;
 import org.codelibs.fess.crawler.Constants;
@@ -63,6 +64,7 @@ import org.slf4j.LoggerFactory;
 
 import com.hierynomus.msdtyp.SID.SidType;
 import com.hierynomus.msdtyp.ace.AceType;
+import com.hierynomus.mssmb2.SMB2Dialect;
 import com.hierynomus.smbj.SmbConfig;
 import com.hierynomus.smbj.SmbConfig.Builder;
 
@@ -236,6 +238,27 @@ public class SmbClient extends AbstractCrawlerClient {
                     break;
                 case "write_timeout":
                     builder.withWriteTimeout(Long.parseLong(value), TimeUnit.MILLISECONDS);
+                case "dialects":
+                    final SMB2Dialect[] dialects = StreamUtil.split(value, ",").get(stream -> stream.map(s -> {
+                        switch (s.trim()) {
+                        case "2.0":
+                        case "2.0.2":
+                            return SMB2Dialect.SMB_2_0_2;
+                        case "2.1":
+                            return SMB2Dialect.SMB_2_1;
+                        case "3.0":
+                            return SMB2Dialect.SMB_3_0;
+                        case "3.0.2":
+                            return SMB2Dialect.SMB_3_0_2;
+                        case "3.1":
+                        case "3.1.1":
+                            return SMB2Dialect.SMB_3_1_1;
+                        default:
+                            break;
+                        }
+                        return SMB2Dialect.UNKNOWN;
+                    }).toArray(n -> new SMB2Dialect[n]));
+                    builder.withDialects(dialects);
                     break;
                 default:
                     if (!key.startsWith("pool.") || !key.startsWith("config.")) {
@@ -436,7 +459,7 @@ public class SmbClient extends AbstractCrawlerClient {
         try {
             final ACE[] aces = file.getSecurity(resolveSids);
             if (logger.isDebugEnabled()) {
-                logger.debug("load ace: {} -> {}", file, Arrays.toString(aces));
+                logger.debug("ACEs: {} -> {}", file, Arrays.toString(aces));
             }
             if (aces != null) {
                 final Set<SID> sidAllowSet = new HashSet<>();
@@ -477,7 +500,7 @@ public class SmbClient extends AbstractCrawlerClient {
             try {
                 final SID[] children = sid.getGroupMemberSids();
                 if (logger.isDebugEnabled()) {
-                    logger.debug("child SID: {} -> {}", sid, Arrays.toString(children));
+                    logger.debug("Child SID: {} -> {}", sid, Arrays.toString(children));
                 }
                 for (final SID child : children) {
                     if (!sidSet.contains(child)) {
@@ -567,7 +590,7 @@ public class SmbClient extends AbstractCrawlerClient {
         this.charset = charset;
     }
 
-    public void setMaxCachedContentSize(int maxCachedContentSize) {
+    public void setMaxCachedContentSize(final int maxCachedContentSize) {
         this.maxCachedContentSize = maxCachedContentSize;
     }
 

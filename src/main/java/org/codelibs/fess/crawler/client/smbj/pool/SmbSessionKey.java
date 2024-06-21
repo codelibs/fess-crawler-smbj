@@ -36,7 +36,7 @@ public class SmbSessionKey {
             host = u.getHost();
             port = u.getPort();
             if (logger.isDebugEnabled()) {
-                logger.debug("create key: host={}, port={}, url={}", host, port, u);
+                logger.debug("Session key: host={}, port={}, url={}", host, port, u);
             }
         } catch (final MalformedURLException e) {
             throw new CrawlerSystemException("Invalid url: " + url, e);

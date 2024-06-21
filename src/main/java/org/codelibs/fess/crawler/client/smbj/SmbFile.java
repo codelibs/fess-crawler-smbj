@@ -104,7 +104,7 @@ public class SmbFile {
             throw new CrawlingAccessException("Invalid url: " + url, e);
         }
         if (logger.isDebugEnabled()) {
-            logger.debug("create file: {} -> {}", url, this);
+            logger.debug("Created file: {} -> {}", url, this);
         }
     }
 
@@ -124,7 +124,7 @@ public class SmbFile {
 
     protected boolean existsObject(final Function<DiskShare, Boolean> func) {
         if (logger.isDebugEnabled()) {
-            logger.debug("exists object: {}", this);
+            logger.debug("Check if {} exists.", this);
         }
         SmbSession session = null;
         try {

@@ -51,11 +51,30 @@ public class PooledSmbSessionFactory extends BaseKeyedPooledObjectFactory<SmbSes
             port = 139;
         }
         if (logger.isDebugEnabled()) {
-            logger.debug("create session: key={}, port={}", key, port);
+            logger.debug("Creating a new session by key={}, port={}", key, port);
         }
         @SuppressWarnings("resource") // close client in destroyObject
         final SMBClient client = new SMBClient(config);
+        if (logger.isDebugEnabled()) {
+            logger.debug("Created SMBClient with " + //
+                    "supportedDialects=" + config.getSupportedDialects() + //
+                    ", signingRequired=" + config.isSigningRequired() + //
+                    ", dfsEnabled=" + config.isDfsEnabled() + //
+                    ", useMultiProtocolNegotiate=" + config.isUseMultiProtocolNegotiate() + //
+                    ", readBufferSize=" + config.getReadBufferSize() + //
+                    ", readTimeout=" + config.getReadTimeout() + //
+                    ", writeBufferSize=" + config.getWriteBufferSize() + //
+                    ", writeTimeout=" + config.getWriteTimeout() + //
+                    ", transactBufferSize=" + config.getTransactBufferSize() + //
+                    ", transactTimeout=" + config.getTransactTimeout() + //
+                    ", soTimeout=" + config.getSoTimeout() + //
+                    ", encryptData=" + config.isEncryptData());
+        }
         final Connection connection = client.connect(key.getHost(), port);
+        if (logger.isDebugEnabled()) {
+            logger.debug("Created Connection: connected={}", connection.isConnected());
+            logger.debug("The number of authentications is {}", authentications.length);
+        }
         for (final SmbAuthentication auth : authentications) {
             if (key.getHost().equals(auth.getServer()) && port == auth.getPort()) {
                 final String domain = auth.getDomain();

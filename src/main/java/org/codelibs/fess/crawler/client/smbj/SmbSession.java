@@ -121,10 +121,10 @@ public class SmbSession implements Closeable {
         return memberSids.toArray(n -> new SID[n]);
     }
 
-    protected boolean closeHandle(SecurityAccountManagerService samrService, ContextHandle handle) {
+    protected boolean closeHandle(final SecurityAccountManagerService samrService, final ContextHandle handle) {
         try {
             return samrService.closeHandle(handle);
-        } catch (IOException e) {
+        } catch (final IOException e) {
             logger.warn("Failed to close " + handle, e);
         }
         return false;
